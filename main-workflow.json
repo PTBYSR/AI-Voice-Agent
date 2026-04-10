@@ -1,0 +1,793 @@
+{
+  "name": "PAUL SIMON RelayPay Voice Support Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vapi-tool-call",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -784,
+        832
+      ],
+      "webhookId": "vapi-tool-call"
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $input.first().json.body || $input.first().json;\nconst message = payload.message || payload;\nconst toolCalls = message.toolCallList || message.toolCalls || [];\nconst toolCall = toolCalls[0] || {};\nconst toolName = toolCall.function?.name || '';\nconst args = toolCall.function?.arguments || {};\nconst parsedArgs = typeof args === 'string' ? JSON.parse(args) : args;\nconst toolCallId = toolCall.id || '';\n\nif (toolName === 'submit_escalation') {\n  return [{\n    json: {\n      toolType: 'escalation',\n      toolCallId,\n      userName: parsedArgs.user_name || '',\n      userEmail: parsedArgs.user_email || '',\n      preferredTime: parsedArgs.preferred_time || '',\n      reason: parsedArgs.reason || ''\n    }\n  }];\n}\n\n// Default: answer_question\nconst userQuery = parsedArgs.question || '';\n\nif (!userQuery || userQuery.trim().length < 3) {\n  return [{\n    json: {\n      toolType: 'answer',\n      toolCallId,\n      userQuery: '',\n      skipProcessing: true,\n      response: \"I didn't quite catch that. Could you please repeat your question?\"\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    toolType: 'answer',\n    toolCallId,\n    userQuery: userQuery.trim(),\n    skipProcessing: false\n  }\n}];"
+      },
+      "id": "node-extract",
+      "name": "Extract & Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "74e1084f-4ff4-4a7c-960c-8177039e7bf0",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "direct_answer",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "f41e9bf8-74b5-4fe5-ba81-3a596fe67838",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "clarify",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "b75906fe-d74e-400b-8388-b405409dcf90",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "decline",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1408,
+        816
+      ],
+      "id": "719434cb-436f-4010-a0ed-5a9b000c761b",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.userQuery }}",
+        "options": {
+          "systemMessage": "You are a customer support agent for RelayPay, a B2B cross-border payments platform for African startups and SMEs.\n\nYou have access to a knowledge base tool. ALWAYS search it before responding.\n\nAfter searching, you must decide ONE of three actions. Respond with a JSON object wrapped in <response> tags:\n\n1. DIRECT ANSWER — you found relevant information and can answer the question:\n<response>\n{\"action\": \"direct_answer\", \"message\": \"your 2-4 sentence answer here\"}\n</response>\n\n2. CLARIFY — the question is vague or missing key details, you need more information before you can search effectively:\n<response>\n{\"action\": \"clarify\", \"message\": \"your specific clarification question here\"}\n</response>\n\n3. DECLINE — you searched but found no relevant information, or answering would require guessing:\n<response>\n{\"action\": \"decline\", \"message\": \"I don't have enough reliable information to answer that accurately. I'd recommend reaching out to our support team at support@relaypay.co for a precise answer. Is there anything else I can help with?\"}\n</response>\n\nRULES:\n- ALWAYS search the knowledge base first, even if you think you know the answer.\n- ONLY use information from the knowledge base. Never answer from your own knowledge.\n- For direct answers: keep to 2-4 sentences, plain spoken language, no bullet points or markdown. End with \"Is there anything else I can help with?\"\n- For clarify: ask ONE specific question to get the missing detail.\n- For decline: use when the KB returned nothing relevant or the topic isn't covered.\n- Never fabricate fees, timelines, or policy details.\n- Be warm and professional."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        720,
+        832
+      ],
+      "id": "36d1e336-e886-4509-937f-e8304df869c5",
+      "name": "AI Agent1"
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "work with your data in vectore store",
+        "tableName": {
+          "__rl": true,
+          "value": "documents",
+          "mode": "list",
+          "cachedResultName": "documents"
+        },
+        "options": {
+          "queryName": "match_documents"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3,
+      "position": [
+        816,
+        1056
+      ],
+      "id": "eabcefc0-3116-4316-b5b6-47c9741903e8",
+      "name": "Supabase Vector Store",
+      "credentials": {
+        "supabaseApi": {
+          "id": "Hbsubtmid3u1GziD",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        896,
+        1264
+      ],
+      "id": "71dff427-27a6-4ab4-a159-0ee2501e142f",
+      "name": "Embeddings OpenAI1",
+      "credentials": {
+        "openAiApi": {
+          "id": "8hPrBjFXvWvVS9z7",
+          "name": "OpenAi account 8"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        688,
+        1056
+      ],
+      "id": "6e0235db-7a60-4421-b893-219d79b5ac6e",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "8hPrBjFXvWvVS9z7",
+          "name": "OpenAi account 8"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Extract Agent Answer').first().json;\n\nreturn [{\n  json: {\n    toolCallId: data.toolCallId,\n    response: data.response\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        640
+      ],
+      "id": "3beecf03-734d-44fa-9929-ca733cbbd5f9",
+      "name": "Clarify Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Extract Agent Answer').first().json;\n\nreturn [{\n  json: {\n    toolCallId: data.toolCallId,\n    response: data.response\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        1024
+      ],
+      "id": "a4096b7d-aeb1-496f-b7d6-ddb7d07093d6",
+      "name": "Decline Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const agentOutput = $input.first().json;\nconst prevData = $('Extract & Validate Input').first().json;\n\nconst output = agentOutput.output || agentOutput.text || agentOutput.response || '';\n\n// Try to extract JSON from <response> tags\nconst tagMatch = output.match(/<response>\\s*([\\s\\S]*?)\\s*<\\/response>/);\nlet parsed;\n\nif (tagMatch) {\n  try {\n    parsed = JSON.parse(tagMatch[1].trim());\n  } catch {\n    parsed = null;\n  }\n}\n\n// If no tags found, try parsing the whole output as JSON\nif (!parsed) {\n  const jsonMatch = output.match(/\\{[\\s\\S]*\"action\"[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    try {\n      parsed = JSON.parse(jsonMatch[0]);\n    } catch {\n      parsed = null;\n    }\n  }\n}\n\n// If still can't parse, treat the whole output as a direct answer\nif (!parsed) {\n  parsed = {\n    action: 'direct_answer',\n    message: output\n  };\n}\n\nreturn [{\n  json: {\n    toolCallId: prevData.toolCallId,\n    action: parsed.action || 'direct_answer',\n    response: parsed.message || output\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        832
+      ],
+      "id": "bc2c2322-d27d-4375-8906-be452b166606",
+      "name": "Extract Agent Answer"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst prevData = $('Extract & Validate Input').first().json;\n\nconst responseText = input.output?.[0]?.content?.[0]?.text \n  || input.text \n  || input.message?.content \n  || JSON.stringify(input);\n\nconst clean = responseText.replace(/```json\\s*/g, '').replace(/```\\s*/g, '').trim();\n\nlet result;\ntry {\n  result = JSON.parse(clean);\n} catch {\n  result = { escalate: true, reason: \"Could not parse escalation check — defaulting to escalate\" };\n}\n\nreturn [{\n  json: {\n    userQuery: prevData.userQuery,\n    toolCallId: prevData.toolCallId,\n    shouldEscalate: result.escalate || false,\n    escalationReason: result.reason || \"\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        1024
+      ],
+      "id": "62a78f00-5b7d-4cbe-b751-6b0690d6a1dc",
+      "name": "Parse Escalation"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "088d0e46-20f5-4351-83e1-d5bca154a52a",
+              "leftValue": "={{ $json.shouldEscalate }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        464,
+        1024
+      ],
+      "id": "c7e68d89-18cc-4cee-a738-37ef4d8973c1",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "GPT-4O"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=CUSTOMER QUESTION: {{ $('Extract & Validate Input').item.json.userQuery }}"
+            },
+            {
+              "role": "system",
+              "content": "You are an escalation detector for RelayPay customer support. Your job is to determine whether a customer's question requires human support or can be handled by the AI agent.\n\nRELAYPAY ESCALATION POLICY:\n\nThe AI agent is designed to handle general product questions and policy clarifications. It must escalate when the request involves account-specific issues, compliance matters, disputes, or situations requiring human judgment.\n\nESCALATE (return true) when the user:\n- Asks about THEIR SPECIFIC account, transaction, or balance (e.g., \"Where is my $500?\", \"Check my transaction TXN-123\")\n- Reports an account restriction or suspension (e.g., \"My account was suspended\", \"I can't access my account\")\n- Requests dispute, refund, or cancellation support (e.g., \"I want a refund\", \"I need to dispute a charge\")\n- Raises compliance or identity verification concerns about their own account (e.g., \"My KYC was rejected\", \"Why is my verification stuck?\")\n- Expresses frustration or urgency about a personal issue (e.g., \"I've been waiting 3 weeks and nobody responds\", \"This is unacceptable\")\n- Asks for information the AI agent must not provide: internal compliance decisions, dispute timelines, specific outcomes, or sensitive account data\n\nDO NOT ESCALATE (return false) when the user:\n- Asks general product questions (e.g., \"What are your transfer fees?\", \"How do I create an invoice?\", \"What currencies do you support?\")\n- Asks how features work (e.g., \"How do payouts work?\", \"Can I invoice in multiple currencies?\")\n- Asks about general pricing, policies, or timelines that apply to all users (e.g., \"How long do international transfers take?\", \"What documents are needed for KYC?\")\n- Asks about onboarding or getting started (e.g., \"How do I sign up?\", \"What regions do you support?\")\n\nKEY DISTINCTION: \n\"What are your fees?\" → general question → DO NOT escalate\n\"Why was I charged $50 on my last transfer?\" → account-specific → ESCALATE\n\"How long do payouts take?\" → general question → DO NOT escalate  \n\"Where is my payout from last Tuesday?\" → account-specific → ESCALATE\n\"What is KYC?\" → general question → DO NOT escalate\n\"My KYC was rejected and I don't know why\" → account-specific → ESCALATE\n\nIf there is genuine uncertainty between general and account-specific, escalation is preferred over guessing.\n\n\nRespond with ONLY a JSON object, no other text:\n{\"escalate\": true or false, \"reason\": \"short reason\"}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "maxTokens": 150,
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        -112,
+        1024
+      ],
+      "id": "ca720c89-8535-4b7f-bf0c-cfa39d31bf27",
+      "name": "LLM Escalation Checker",
+      "credentials": {
+        "openAiApi": {
+          "id": "8hPrBjFXvWvVS9z7",
+          "name": "OpenAi account 8"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "9e198af0-1996-4b30-b0b6-2a68d64ba490",
+              "leftValue": "={{ $json.toolType }}",
+              "rightValue": "escalation",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -336,
+        832
+      ],
+      "id": "0610829d-5d68-4ca3-b3ec-9a47208520a2",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://qfkwdfqrkrgjejzqxrsm.supabase.co/rest/v1/escalations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcyMDk3OSwiZXhwIjoyMDkxMjk2OTc5fQ.EUIu1Uwb4ahyqFdaXXzYU_Y4I87nN6CJFjF7h9CkdhE"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcyMDk3OSwiZXhwIjoyMDkxMjk2OTc5fQ.EUIu1Uwb4ahyqFdaXXzYU_Y4I87nN6CJFjF7h9CkdhE"
+            },
+            {
+              "name": " Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"user_name\": \"{{ $('Extract & Validate Input').first().json.userName }}\",\n  \"user_email\": \"{{ $('Extract & Validate Input').first().json.userEmail }}\",\n  \"escalation_reason\": \"{{ $('Extract & Validate Input').first().json.reason }}\",\n  \"appointment_time\": \"{{ $('Extract & Validate Input').first().json.preferredTime }}\",\n  \"call_booked\": true,\n  \"status\": \"Open\",\n  \"category\": \"other\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        768,
+        416
+      ],
+      "id": "cc80a794-236b-4c38-a422-2b84fe9cdd44",
+      "name": "Insert Escalation"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "C0AP7PR3E8M",
+          "mode": "list",
+          "cachedResultName": "escalations"
+        },
+        "text": "=🚨 New escalation from {{ $('Extract & Validate Input').first().json.userName }} ({{ $('Extract & Validate Input').first().json.userEmail }}). Reason: {{ $('Extract & Validate Input').first().json.reason }}. Preferred callback: {{ $('Extract & Validate Input').first().json.preferredTime }}",
+        "otherOptions": {}
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        1104,
+        432
+      ],
+      "id": "51a32fe7-679d-4da9-8692-fe25db8fe1cd",
+      "name": "Send a message",
+      "webhookId": "d42512a6-23f5-4cfd-a3da-df9c72ba2cc7",
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "vef3yw5qjheKJVCL",
+          "name": "Slack OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nreturn [{\n  json: {\n    toolCallId: $('Extract & Validate Input').first().json.toolCallId,\n    response: \"Escalation submitted successfully. A support specialist will contact you at your preferred time.\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        448
+      ],
+      "id": "9fcb0d19-bb51-4be2-a67b-f91c88233c1c",
+      "name": "Return Confirmation to VAPI"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\n// Handle both formats — direct response or already formatted\nif (data.results) {\n  return [{ json: data }];\n}\n\nreturn [{\n  json: {\n    results: [\n      {\n        toolCallId: data.toolCallId,\n        result: data.response\n      }\n    ]\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        1216
+      ],
+      "id": "7ec7bfa6-2da5-4a31-a1ac-967e68134778",
+      "name": "Format Response for VAPI"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nif (data.results) {\n  return [{ json: data }];\n}\n\nreturn [{\n  json: {\n    results: [\n      {\n        toolCallId: data.toolCallId,\n        result: data.response\n      }\n    ]\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1856,
+        832
+      ],
+      "id": "f9d03ebd-2185-49c4-a258-552d9fee6a3e",
+      "name": "Format Response for Vapi"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2080,
+        832
+      ],
+      "id": "a50facc1-cca7-42cc-841e-ce16dfca4cea",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Extract Agent Answer').first().json;\n\nreturn [{\n  json: {\n    toolCallId: data.toolCallId,\n    response: data.response\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        832
+      ],
+      "id": "873d3139-e935-4247-b5ae-9a275907c05d",
+      "name": "Direct Answer Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nreturn [{\n  json: {\n    toolCallId: data.toolCallId,\n    response: \"This requires assistance from our support team. I've just brought up a short form on your screen. Please fill in your name, email, and preferred callback time and hit submit. I'll wait right here.\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        1216
+      ],
+      "id": "4ba307c9-595d-475f-9740-2be1d1c808a4",
+      "name": "Escalation Trigger"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract & Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract & Validate Input": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Direct Answer Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Clarify Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Decline Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Vector Store": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI1": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Supabase Vector Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clarify Response": {
+      "main": [
+        [
+          {
+            "node": "Format Response for Vapi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Extract Agent Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Escalation": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Escalation Trigger",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Escalation Checker": {
+      "main": [
+        [
+          {
+            "node": "Parse Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Insert Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LLM Escalation Checker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Escalation": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Return Confirmation to VAPI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response for Vapi": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Agent Answer": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decline Response": {
+      "main": [
+        [
+          {
+            "node": "Format Response for Vapi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response for VAPI": {
+      "main": [
+        [
+          {
+            "node": "Format Response for Vapi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return Confirmation to VAPI": {
+      "main": [
+        [
+          {
+            "node": "Format Response for Vapi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Direct Answer Response": {
+      "main": [
+        [
+          {
+            "node": "Format Response for Vapi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalation Trigger": {
+      "main": [
+        [
+          {
+            "node": "Format Response for VAPI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "66ac44b8-dab4-44d7-a8e0-05a160a0534a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2c950992e72c1f7626700d7c88cf07f1fa608dd6abbe3ba3e9ff0a6cfdcbd670"
+  },
+  "id": "fmQIfUvWvEFB6wNm",
+  "tags": []
+}

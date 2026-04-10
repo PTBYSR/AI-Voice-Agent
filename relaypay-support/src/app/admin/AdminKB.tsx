@@ -2,11 +2,10 @@
 
 import { useState, useRef, useCallback, useEffect, DragEvent, ChangeEvent } from "react";
 
+import { sbFetch } from "@/lib/supabase";
+
 const WEBHOOK_URL = "https://cohort2pod1.app.n8n.cloud/webhook-test/a8a6a5f8-e5b9-4fe0-a018-6da8e6b281cd";
 const ADMIN_KEY = "relaypay-admin-2026";
-const SUPABASE_URL = "https://qfkwdfqrkrgjejzqxrsm.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3MjA5NzksImV4cCI6MjA5MTI5Njk3OX0.LWA3bEOc9mwMHhSCgbg36jTt7VJJHVBEvUVQCbpMfuw";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const ACCEPTED_TYPES = [".txt", ".md", ".pdf"];
@@ -105,33 +104,23 @@ function timeAgo(iso: string) {
 
 function truncate(str: string, n: number) { return str.length > n ? str.slice(0, n) + "…" : str; }
 
-function sbHeaders() {
-  return { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, "Content-Type": "application/json" };
-}
-
 async function saveProcessedDoc(doc: Omit<ProcessedDoc, "id" | "uploaded_at">) {
-  await fetch(`${SUPABASE_URL}/rest/v1/processed_documents`, {
+  await sbFetch(`processed_documents`, {
     method: "POST",
-    headers: { ...sbHeaders(), Prefer: "return=minimal" },
+    headers: { Prefer: "return=minimal" },
     body: JSON.stringify(doc),
   });
 }
 
 async function deleteProcessedDoc(id: number, source: string) {
   // Delete from processed_documents
-  await fetch(`${SUPABASE_URL}/rest/v1/processed_documents?id=eq.${id}`, {
-    method: "DELETE", headers: sbHeaders(),
-  });
+  await sbFetch(`processed_documents?id=eq.${id}`, { method: "DELETE" });
   // Delete matching chunks from documents table (n8n embeddings store)
-  await fetch(`${SUPABASE_URL}/rest/v1/documents?metadata->>source=eq.${encodeURIComponent(source)}`, {
-    method: "DELETE", headers: sbHeaders(),
-  }).catch(() => {/* table may not exist yet */});
+  await sbFetch(`documents?metadata->>source=eq.${encodeURIComponent(source)}`, { method: "DELETE" }).catch(() => {});
 }
 
 async function deleteUploadStatus(uploadId: string) {
-  await fetch(`${SUPABASE_URL}/rest/v1/upload_status?id=eq.${uploadId}`, {
-    method: "DELETE", headers: sbHeaders(),
-  });
+  await sbFetch(`upload_status?id=eq.${uploadId}`, { method: "DELETE" });
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -172,9 +161,7 @@ export default function AdminKB() {
   // ── Load processed docs ────────────────────────────────────────────────────
 
   function loadDocs() {
-    fetch(`${SUPABASE_URL}/rest/v1/processed_documents?select=*&order=uploaded_at.desc`, {
-      headers: sbHeaders(),
-    })
+    sbFetch("processed_documents?select=*&order=uploaded_at.desc")
       .then((r) => r.json())
       .then((rows) => setProcessedDocs(Array.isArray(rows) ? rows : []))
       .catch(() => setProcessedDocs([]))
@@ -234,10 +221,7 @@ export default function AdminKB() {
 
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/upload_status?id=eq.${uploadId}&select=*`,
-          { headers: sbHeaders() }
-        );
+        const res = await sbFetch(`upload_status?id=eq.${uploadId}&select=*`);
         if (!res.ok) return;
         const rows = await res.json();
         if (!Array.isArray(rows) || rows.length === 0) return;

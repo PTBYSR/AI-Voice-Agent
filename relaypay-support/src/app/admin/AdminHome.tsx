@@ -2,9 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const SUPABASE_URL = "https://qfkwdfqrkrgjejzqxrsm.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU3MjA5NzksImV4cCI6MjA5MTI5Njk3OX0.LWA3bEOc9mwMHhSCgbg36jTt7VJJHVBEvUVQCbpMfuw";
+import { sbFetch } from "@/lib/supabase";
 
 type Page = "home" | "kb" | "voice" | "history";
 
@@ -12,12 +10,6 @@ interface LastCall {
   started_at: string;
   duration_seconds: number | null;
   status: string;
-}
-
-function sbFetch(path: string) {
-  return fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-  });
 }
 
 function formatDuration(secs: number | null) {
@@ -28,9 +20,31 @@ function formatDuration(secs: number | null) {
 }
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  const d = new Date(iso);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const isYesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toDateString() === d.toDateString();
+
+  const timeStr = d.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
   });
+
+  let dateStr = d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+
+  if (isToday) dateStr = "Today";
+  else if (isYesterday) dateStr = "Yesterday";
+
+  return (
+    <div className="flex flex-col leading-tight">
+      <span className="text-sm font-medium text-[#4F5B66]">{dateStr}</span>
+      <span className="text-2xl mt-0.5">{timeStr}</span>
+    </div>
+  );
 }
 
 function StatCard({
@@ -61,7 +75,7 @@ function StatCard({
         {loading ? (
           <div className="h-8 w-16 bg-[#F7F8FA] rounded-lg animate-pulse mt-1" />
         ) : (
-          <p className="text-3xl font-semibold text-[#0A2540] mt-1 leading-none">{value}</p>
+          <div className="text-3xl font-semibold text-[#0A2540] mt-1 leading-none">{value}</div>
         )}
         <p className="text-xs text-[#B0B8C1] mt-1">{sub}</p>
       </div>

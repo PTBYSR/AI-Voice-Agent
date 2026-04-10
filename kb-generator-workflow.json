@@ -1,0 +1,825 @@
+{
+  "name": "RelayPay Knowledge Base Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "a8a6a5f8-e5b9-4fe0-a018-6da8e6b281cd",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        -192
+      ],
+      "id": "65474c7a-1af9-492e-81f7-e598c0acb0a4",
+      "name": "Webhook",
+      "webhookId": "a8a6a5f8-e5b9-4fe0-a018-6da8e6b281cd"
+    },
+    {
+      "parameters": {
+        "jsCode": "const headers = $input.first().json.headers;\nconst adminKey = headers['x-admin-key'] || '';\n\nif (adminKey !== 'relaypay-admin-2026') {\n  throw new Error('Unauthorized: invalid admin key');\n}\n\nconst body = $input.first().json.body;\nconst uploadId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);\n\n// Determine upload type\nconst uploadType = body.type || 'file';\n\nreturn [{\n  json: {\n    uploadType,\n    content: body.content || null,\n    fileName: body.fileName || null,\n    url: body.url || null,\n    category: body.category,\n    uploadId\n  }\n}];"
+      },
+      "id": "7ff271bc-7a79-4d60-a8d7-2d111a87aa9a",
+      "name": "Validate Admin Key",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { content, fileName, category } = $('Validate Admin Key').first().json;\n\n// Decode base64 to plain text\nlet text;\ntry {\n  text = Buffer.from(content, 'base64').toString('utf-8');\n} catch (err) {\n  throw new Error('Failed to decode file content: ' + err.message);\n}\n\n// Clean up — remove BOM and excessive whitespace\ntext = text.replace(/^\\uFEFF/, '').trim();\n\n// Validate — don't process empty or tiny files\nif (!text || text.length < 50) {\n  throw new Error('File is empty or too short to process. Minimum 50 characters required. Got: ' + text.length);\n}\n\nreturn [{\n  json: {\n    text,\n    fileName,\n    category,\n    characterCount: text.length\n  }\n}];"
+      },
+      "id": "9906c1e4-4e07-4ecb-bf29-7f99eccfcfcd",
+      "name": "Decode Base64 to Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { text, fileName, category } = $input.first().json;\n\nconst CHUNK_SIZE = 1500;\nconst CHUNK_OVERLAP = 200;\nconst uploadedAt = new Date().toISOString();\n\n// First try splitting on markdown headings\nlet sections = text.split(/(?=\\n#{1,3}\\s)/);\n\n// If no headings found, treat the whole text as one section\nif (sections.length === 1) {\n  sections = [text];\n}\n\nconst chunks = [];\nlet chunkIndex = 0;\n\nfor (const section of sections) {\n  const trimmed = section.trim();\n  if (trimmed.length === 0) continue;\n\n  // Try to extract a heading from this section\n  const headingMatch = trimmed.match(/^#{1,3}\\s+(.+)/);\n  const sectionTitle = headingMatch ? headingMatch[1].trim() : 'General';\n\n  // If section fits in one chunk, keep it as-is\n  if (trimmed.length <= CHUNK_SIZE) {\n    chunks.push({\n      content: trimmed,\n      metadata: {\n        source: fileName,\n        category: category,\n        section: sectionTitle,\n        chunk_index: chunkIndex,\n        uploaded_at: uploadedAt\n      }\n    });\n    chunkIndex++;\n    continue;\n  }\n\n  // Section is too large — split by paragraphs with overlap\n  const paragraphs = trimmed.split(/\\n\\n+/);\n  let currentChunk = '';\n\n  for (const para of paragraphs) {\n    const testLength = currentChunk\n      ? (currentChunk + '\\n\\n' + para).length\n      : para.length;\n\n    if (testLength > CHUNK_SIZE && currentChunk.length > 0) {\n      // Save current chunk\n      chunks.push({\n        content: currentChunk.trim(),\n        metadata: {\n          source: fileName,\n          category: category,\n          section: sectionTitle,\n          chunk_index: chunkIndex,\n          uploaded_at: uploadedAt\n        }\n      });\n      chunkIndex++;\n\n      // Start new chunk with overlap from the end of previous\n      const overlap = currentChunk.slice(-CHUNK_OVERLAP);\n      currentChunk = overlap + '\\n\\n' + para;\n    } else {\n      currentChunk = currentChunk\n        ? currentChunk + '\\n\\n' + para\n        : para;\n    }\n  }\n\n  // Save the last chunk from this section\n  if (currentChunk.trim().length > 0) {\n    chunks.push({\n      content: currentChunk.trim(),\n      metadata: {\n        source: fileName,\n        category: category,\n        section: sectionTitle,\n        chunk_index: chunkIndex,\n        uploaded_at: uploadedAt\n      }\n    });\n    chunkIndex++;\n  }\n}\n\n// Safety check\nif (chunks.length === 0) {\n  throw new Error('Chunking produced zero chunks. Check the input text.');\n}\n\n// Return each chunk as a separate item\nreturn chunks.map(c => ({ json: c }));"
+      },
+      "id": "b0b25866-abde-4c70-baaa-6b4d73d721be",
+      "name": "Chunk Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst fileName = items[0]?.json?.metadata?.source\n  || $('Chunk Text').first().json.metadata.source\n  || 'unknown';\n\nreturn [{\n  json: {\n    success: true,\n    chunks_stored: items.length,\n    fileName: fileName,\n    message: `Document \"${fileName}\" processed and stored as ${items.length} chunk(s).`\n  }\n}];"
+      },
+      "id": "ec135df6-de23-4cae-8f5a-d9e948d7e522",
+      "name": "Prepare Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3712,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $('Prepare Success Response').item.json }}",
+        "options": {}
+      },
+      "id": "e4a19549-58e6-48c4-a55b-68ea53f8d531",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        3936,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://qfkwdfqrkrgjejzqxrsm.supabase.co/rest/v1/documents?metadata->>source=eq.{{ $('Chunk Text').item.json.metadata.source }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcyMDk3OSwiZXhwIjoyMDkxMjk2OTc5fQ.EUIu1Uwb4ahyqFdaXXzYU_Y4I87nN6CJFjF7h9CkdhE"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcyMDk3OSwiZXhwIjoyMDkxMjk2OTc5fQ.EUIu1Uwb4ahyqFdaXXzYU_Y4I87nN6CJFjF7h9CkdhE"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2240,
+        -96
+      ],
+      "id": "9a130e4f-9749-429b-ab0d-73e14224b3e5",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://qfkwdfqrkrgjejzqxrsm.supabase.co/rest/v1/upload_status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcyMDk3OSwiZXhwIjoyMDkxMjk2OTc5fQ.EUIu1Uwb4ahyqFdaXXzYU_Y4I87nN6CJFjF7h9CkdhE"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcyMDk3OSwiZXhwIjoyMDkxMjk2OTc5fQ.EUIu1Uwb4ahyqFdaXXzYU_Y4I87nN6CJFjF7h9CkdhE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"id\": \"{{ $json.uploadId }}\",\n  \"file_name\": \"{{ $json.fileName || $json.url || 'unknown' }}\",\n  \"status\": \"started\",\n  \"detail\": \"Upload received, validating document...\",\n  \"updated_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        448,
+        -192
+      ],
+      "id": "00e35028-3d91-49b3-b7d7-e42c940ad50d",
+      "name": "Status - Started"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"uploadId\": \"{{ $json.uploadId }}\",\n  \"status\": \"processing\",\n  \"message\": \"Document upload received. Processing started.\"\n}",
+        "options": {}
+      },
+      "id": "a3b4e330-ced8-4d98-8def-f00367c7dbb5",
+      "name": "Respond to Webhook1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        896,
+        -384
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const authData = $('Validate Admin Key').first().json;\nreturn [{ json: authData }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -384
+      ],
+      "id": "935d920c-53a7-40c8-af3f-a2f49ae0403e",
+      "name": "Pass Through"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://qfkwdfqrkrgjejzqxrsm.supabase.co/rest/v1/upload_status?id=eq.{{ $('Validate Admin Key').first().json.uploadId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcyMDk3OSwiZXhwIjoyMDkxMjk2OTc5fQ.EUIu1Uwb4ahyqFdaXXzYU_Y4I87nN6CJFjF7h9CkdhE"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcyMDk3OSwiZXhwIjoyMDkxMjk2OTc5fQ.EUIu1Uwb4ahyqFdaXXzYU_Y4I87nN6CJFjF7h9CkdhE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"decoding\",\n  \"detail\": \"Document decoded, preparing to chunk...\",\n  \"updated_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        -192
+      ],
+      "id": "51cb34d5-3b93-44f9-aabd-61ad3fc70193",
+      "name": "Status - Decoded"
+    },
+    {
+      "parameters": {
+        "jsCode": "const decodeData = $('Decode Base64 to Text').first().json;\nreturn [{ json: decodeData }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        -192
+      ],
+      "id": "8dd99e6b-45ce-40db-9980-02053f49cafb",
+      "name": "Pass Through1"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://qfkwdfqrkrgjejzqxrsm.supabase.co/rest/v1/upload_status?id=eq.{{ $('Validate Admin Key').first().json.uploadId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcyMDk3OSwiZXhwIjoyMDkxMjk2OTc5fQ.EUIu1Uwb4ahyqFdaXXzYU_Y4I87nN6CJFjF7h9CkdhE"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcyMDk3OSwiZXhwIjoyMDkxMjk2OTc5fQ.EUIu1Uwb4ahyqFdaXXzYU_Y4I87nN6CJFjF7h9CkdhE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"chunking\",\n  \"detail\": \"{{ 'Document split into ' + $input.all().length + ' chunks. Starting embedding...' }}\",\n  \"chunks_total\": {{ $input.all().length }},\n  \"chunks_processed\": 0,\n  \"updated_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2016,
+        -96
+      ],
+      "id": "bf185b3e-a261-43a5-9ea8-e811259a206e",
+      "name": "Status - Chunked"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allChunks = $input.all();\nconst totalChunks = allChunks.length;\n\n// Pass through all chunks but add the total count to each\nreturn allChunks.map(item => ({\n  json: {\n    ...item.json,\n    totalChunks\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        -96
+      ],
+      "id": "da82fd1c-8445-412e-9485-fb597085fb2a",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b782dc3e-b40e-4670-87ff-f615d2e88d3b",
+              "leftValue": "={{ $('Validate Admin Key').item.json.uploadType }}",
+              "rightValue": "url",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        672,
+        -96
+      ],
+      "id": "d937253a-8e1d-4192-a705-ff04c0705086",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "url": "=https://r.jina.ai/{{ $('Validate Admin Key').item.json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "text/markdown"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "0c4f77ca-bf2c-4eec-9258-fc0cc1d76419",
+      "name": "Fetch via Jina"
+    },
+    {
+      "parameters": {
+        "jsCode": "const jinaResponse = $input.first().json;\nconst authData = $('Validate Admin Key').first().json;\n\nconst text = jinaResponse.data || jinaResponse.body || (typeof jinaResponse === 'string' ? jinaResponse : JSON.stringify(jinaResponse));\n\nconst cleanText = (typeof text === 'string' ? text : String(text)).trim();\n\nif (!cleanText || cleanText.length < 50) {\n  throw new Error('Jina returned empty or insufficient content from the URL. The page might be behind a login or block scrapers.');\n}\n\n// Extract a filename from the URL without using URL constructor\nconst url = authData.url || 'unknown';\nconst fileName = url\n  .replace(/^https?:\\/\\//, '')\n  .replace(/[^a-zA-Z0-9.-]/g, '_')\n  .slice(0, 60) + '.md';\n\nreturn [{\n  json: {\n    text: cleanText,\n    fileName,\n    category: authData.category,\n    characterCount: cleanText.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        0
+      ],
+      "id": "667b84e0-4627-4ead-99b4-8a8e7a4e4bc5",
+      "name": "Format URL Content"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://qfkwdfqrkrgjejzqxrsm.supabase.co/rest/v1/upload_status?id=eq.{{ $('Validate Admin Key').first().json.uploadId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcyMDk3OSwiZXhwIjoyMDkxMjk2OTc5fQ.EUIu1Uwb4ahyqFdaXXzYU_Y4I87nN6CJFjF7h9CkdhE"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcyMDk3OSwiZXhwIjoyMDkxMjk2OTc5fQ.EUIu1Uwb4ahyqFdaXXzYU_Y4I87nN6CJFjF7h9CkdhE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"complete\",\n  \"detail\": \"{{ 'Done! Document processed and stored as ' + $input.all().length + ' chunk(s).' }}\",\n  \"chunks_processed\": {{ $input.all().length }},\n  \"updated_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3488,
+        -96
+      ],
+      "id": "b3195014-b08b-488e-ab4b-aa9713a33691",
+      "name": "Status - Complete"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $('Code in JavaScript').all();\n\nreturn items.map(item => ({\n  json: {\n    pageContent: item.json.content,\n    metadata: {\n      source: item.json.metadata.source,\n      category: item.json.metadata.category\n    }\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        -96
+      ],
+      "id": "2fe36ee2-574d-4887-bb0d-a6b6c0bf1266",
+      "name": "Format for Vector Store"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://qfkwdfqrkrgjejzqxrsm.supabase.co/rest/v1/upload_status?id=eq.{{ $('Validate Admin Key').first().json.uploadId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcyMDk3OSwiZXhwIjoyMDkxMjk2OTc5fQ.EUIu1Uwb4ahyqFdaXXzYU_Y4I87nN6CJFjF7h9CkdhE"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFma3dkZnFya3JnamVqenF4cnNtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTcyMDk3OSwiZXhwIjoyMDkxMjk2OTc5fQ.EUIu1Uwb4ahyqFdaXXzYU_Y4I87nN6CJFjF7h9CkdhE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"embedding\",\n  \"detail\": \"Processing chunks...\",\n  \"updated_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3264,
+        -96
+      ],
+      "id": "e203c062-e8c9-4052-a986-d8e52bf5e4fa",
+      "name": "Status - Embedding"
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "tableName": {
+          "__rl": true,
+          "value": "documents",
+          "mode": "list",
+          "cachedResultName": "documents"
+        },
+        "options": {
+          "queryName": "match_documents"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3,
+      "position": [
+        2688,
+        -96
+      ],
+      "id": "7ae4b1e3-b56c-4001-96a9-b4ac6ff97d47",
+      "name": "Supabase Vector Store",
+      "credentials": {
+        "supabaseApi": {
+          "id": "Hbsubtmid3u1GziD",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        2704,
+        128
+      ],
+      "id": "5383c1e7-560d-48c3-94f0-bd35eeb63af4",
+      "name": "Embeddings OpenAI",
+      "credentials": {
+        "openAiApi": {
+          "id": "8hPrBjFXvWvVS9z7",
+          "name": "OpenAi account 8"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        2832,
+        128
+      ],
+      "id": "cb5ac8f4-d08f-483b-882e-80b0d670abcb",
+      "name": "Default Data Loader"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        3040,
+        -96
+      ],
+      "id": "8f6ee7a9-f5e0-4330-93c7-518bbd4a6e2e",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        240
+      ],
+      "id": "11463969-4ccb-4f68-afc1-1f319e010f96",
+      "name": "Default Data Loader1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Admin Key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Admin Key": {
+      "main": [
+        [
+          {
+            "node": "Status - Started",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decode Base64 to Text": {
+      "main": [
+        [
+          {
+            "node": "Status - Decoded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk Text": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Success Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Format for Vector Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status - Started": {
+      "main": [
+        [
+          {
+            "node": "Pass Through",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass Through": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status - Decoded": {
+      "main": [
+        [
+          {
+            "node": "Pass Through1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass Through1": {
+      "main": [
+        [
+          {
+            "node": "Chunk Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status - Chunked": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Status - Chunked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Fetch via Jina",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Decode Base64 to Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch via Jina": {
+      "main": [
+        [
+          {
+            "node": "Format URL Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format URL Content": {
+      "main": [
+        [
+          {
+            "node": "Chunk Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status - Complete": {
+      "main": [
+        [
+          {
+            "node": "Prepare Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format for Vector Store": {
+      "main": [
+        [
+          {
+            "node": "Supabase Vector Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status - Embedding": {
+      "main": [
+        [
+          {
+            "node": "Status - Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Vector Store": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings OpenAI": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Supabase Vector Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Data Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Supabase Vector Store",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Status - Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Data Loader1": {
+      "ai_document": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "a491aed5-b3e3-4641-a84d-2c241694ffca",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2c950992e72c1f7626700d7c88cf07f1fa608dd6abbe3ba3e9ff0a6cfdcbd670"
+  },
+  "id": "8rzt2vKSJhIwDJyV",
+  "tags": []
+}

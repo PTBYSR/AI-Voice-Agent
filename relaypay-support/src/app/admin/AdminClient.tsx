@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import AdminHome from "./AdminHome";
 import AdminKB from "./AdminKB";
 import AdminVoice from "./AdminVoice";
 import AdminHistory from "./AdminHistory";
+import AdminEscalations from "./AdminEscalations";
 
-type Page = "home" | "kb" | "voice" | "history";
+type Page = "home" | "kb" | "voice" | "history" | "escalation";
 
 const ADMIN_PASSWORD = "relaypay-admin-2026";
 
@@ -52,11 +53,23 @@ function IconHistory({ active }: { active: boolean }) {
   );
 }
 
+function IconEscalation({ active }: { active: boolean }) {
+  const c = active ? "#0C8C8C" : "#94a3b8";
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+      <line x1="12" y1="9" x2="12" y2="13"></line>
+      <line x1="12" y1="17" x2="12.01" y2="17"></line>
+    </svg>
+  );
+}
+
 const NAV_ITEMS: { id: Page; label: string; Icon: React.FC<{ active: boolean }> }[] = [
-  { id: "home",    label: "Home",          Icon: IconHome },
-  { id: "kb",      label: "Knowledge Base", Icon: IconKB },
-  { id: "voice",   label: "Voice Agent",    Icon: IconVoice },
-  { id: "history", label: "Call History",   Icon: IconHistory },
+  { id: "home",       label: "Home",           Icon: IconHome },
+  { id: "kb",         label: "Knowledge Base", Icon: IconKB },
+  { id: "voice",      label: "Voice Agent",    Icon: IconVoice },
+  { id: "history",    label: "Call History",   Icon: IconHistory },
+  { id: "escalation", label: "Escalations",    Icon: IconEscalation },
 ];
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
@@ -67,9 +80,17 @@ export default function AdminClient() {
   const [passwordError, setPasswordError] = useState(false);
   const [page, setPage] = useState<Page>("home");
 
+  useEffect(() => {
+    const isAuthed = sessionStorage.getItem("relaypay_admin_authed") === "true";
+    if (isAuthed) {
+      setAuthed(true);
+    }
+  }, []);
+
   function handleLogin() {
     if (passwordInput === ADMIN_PASSWORD) {
       setAuthed(true);
+      sessionStorage.setItem("relaypay_admin_authed", "true");
       setPasswordError(false);
     } else {
       setPasswordError(true);
@@ -80,10 +101,11 @@ export default function AdminClient() {
   if (!authed) {
     return (
       <div className="min-h-screen bg-[#F7F8FA] flex items-center justify-center p-4">
-        <div className="bg-white border border-[#E2E5EA] rounded-2xl shadow-sm p-8 w-full max-w-sm flex flex-col gap-5">
-          <div>
-            <p className="text-lg font-semibold text-[#0A2540]">RelayPay Admin</p>
-            <p className="text-sm text-[#4F5B66] mt-0.5">Enter your password to continue</p>
+        <div className="bg-white border border-[#E2E5EA] rounded-2xl shadow-sm p-8 w-full max-w-sm flex flex-col gap-6">
+          <div className="flex flex-col items-center text-center">
+            <img src="/logo.png" alt="RelayPay Logo" className="w-12 h-12 object-contain mb-4" />
+            <p className="text-xl font-semibold text-[#0A2540]">RelayPay Admin</p>
+            <p className="text-sm text-[#4F5B66] mt-1">Enter your password to continue</p>
           </div>
           <input
             type="password"
@@ -112,9 +134,9 @@ export default function AdminClient() {
 
       {/* Sidebar — desktop */}
       <aside className="hidden md:flex flex-col items-center w-16 bg-[#0A1F44] py-6 gap-2 fixed top-0 left-0 h-full z-20">
-        {/* Logo dot */}
-        <div className="w-8 h-8 rounded-lg bg-[#0C8C8C] flex items-center justify-center mb-4 shrink-0">
-          <span className="text-white text-xs font-bold">R</span>
+        {/* Logo */}
+        <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center mb-4 shrink-0 overflow-hidden p-1.5">
+          <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
         </div>
 
         {NAV_ITEMS.map(({ id, label, Icon }) => (
@@ -138,10 +160,11 @@ export default function AdminClient() {
       {/* Main content */}
       <div className="flex-1 md:ml-16 flex flex-col pb-16 md:pb-0">
         <main className="flex-1 p-6 md:p-8">
-          {page === "home"    && <AdminHome    onNavigate={setPage} />}
-          {page === "kb"      && <AdminKB />}
-          {page === "voice"   && <AdminVoice />}
-          {page === "history" && <AdminHistory />}
+          {page === "home"       && <AdminHome onNavigate={setPage} />}
+          {page === "kb"         && <AdminKB />}
+          {page === "voice"      && <AdminVoice />}
+          {page === "history"    && <AdminHistory />}
+          {page === "escalation" && <AdminEscalations />}
         </main>
       </div>
 
