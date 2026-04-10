@@ -1,0 +1,395 @@
+{
+  "name": "RelayPay Voice Support Agent",
+  "nodes": [
+    {
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vapi-tool-call",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "webhookId": "vapi-tool-call"
+    },
+    {
+      "id": "node-extract",
+      "name": "Extract & Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "parameters": {
+        "jsCode": "const payload = $input.first().json;\n\n// VAPI payload structure — handle both possible formats\nconst message = payload.message || payload;\nconst toolCalls = message.toolCallList || message.toolCalls || [];\nconst toolCall = toolCalls[0] || {};\nconst args = toolCall.function?.arguments || {};\nconst userQuery = (typeof args === 'string' ? JSON.parse(args) : args).question || '';\nconst toolCallId = toolCall.id || '';\n\n// Validate\nif (!userQuery || userQuery.trim().length < 3) {\n  return [{\n    json: {\n      toolCallId,\n      intent: 'clarify',\n      clarification_question: \"I didn't quite catch that. Could you please repeat your question?\",\n      response: \"I didn't quite catch that. Could you please repeat your question?\",\n      skipProcessing: true\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    toolCallId,\n    userQuery: userQuery.trim(),\n    skipProcessing: false\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-check-skip",
+      "name": "Check Skip",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 300],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "skip-check",
+              "leftValue": "={{ $json.skipProcessing }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-classify",
+      "name": "Classify Intent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "ANTHROPIC_API_KEY_HERE" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-haiku-4-5-20251001\",\n  \"max_tokens\": 300,\n  \"temperature\": 0,\n  \"system\": \"You are an intent classifier for RelayPay customer support. Analyze the customer's question and respond with ONLY a valid JSON object, no other text:\\n\\n{\\n  \\\"intent\\\": \\\"direct_answer\\\" | \\\"clarify\\\" | \\\"escalate\\\",\\n  \\\"category\\\": \\\"onboarding\\\" | \\\"pricing\\\" | \\\"payouts\\\" | \\\"transactions\\\" | \\\"invoicing\\\" | \\\"compliance\\\" | \\\"general\\\",\\n  \\\"clarification_question\\\": \\\"only include this field if intent is clarify\\\",\\n  \\\"escalation_reason\\\": \\\"only include this field if intent is escalate\\\"\\n}\\n\\nClassification rules:\\nDIRECT_ANSWER — clear specific questions about general product features, pricing, timelines, processes, policies.\\nCLARIFY — ambiguous or missing critical details. Always provide clarification_question.\\nESCALATE — specific transaction/account queries, complaints, disputes, refunds, fraud, security concerns.\",\n  \"messages\": [{\"role\": \"user\", \"content\": \"{{ $json.userQuery }}\"}]\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-parse-intent",
+      "name": "Parse Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 400],
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst upstream = $('Extract & Validate Input').first().json;\n\nlet classification;\ntry {\n  const text = input.content?.[0]?.text || input.content || '{}';\n  classification = typeof text === 'string' ? JSON.parse(text) : text;\n} catch(e) {\n  classification = { intent: 'escalate', category: 'general', escalation_reason: 'Failed to classify intent' };\n}\n\nreturn [{\n  json: {\n    ...upstream,\n    intent: classification.intent || 'escalate',\n    category: classification.category || 'general',\n    clarification_question: classification.clarification_question || '',\n    escalation_reason: classification.escalation_reason || ''\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-route",
+      "name": "Route by Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1200, 400],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "id": "rule-direct",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "direct_answer",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "direct_answer"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "id": "rule-clarify",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "clarify",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "clarify"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "id": "rule-escalate",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "escalate",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalate"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-embed",
+      "name": "Embed Query (Placeholder)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer OPENAI_API_KEY_HERE" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\": \"text-embedding-3-small\", \"input\": \"{{ $json.userQuery }}\"}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-vector-search",
+      "name": "Vector Search (Placeholder)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "https://VECTOR_STORE_URL_HERE/query",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer VECTOR_STORE_API_KEY_HERE" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"vector\": {{ $json.data[0].embedding }}, \"top_k\": 5, \"min_score\": 0.70}",
+        "options": {
+          "continueOnFail": true
+        }
+      }
+    },
+    {
+      "id": "node-check-results",
+      "name": "Check RAG Results",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1920, 200],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "results-check",
+              "leftValue": "={{ $json.matches?.length || 0 }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-rag-fallback",
+      "name": "RAG Fallback Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 100],
+      "parameters": {
+        "jsCode": "const upstream = $('Extract & Validate Input').first().json;\nreturn [{\n  json: {\n    toolCallId: upstream.toolCallId,\n    response: \"I don't have specific information about that in my knowledge base. Let me connect you with our support team who can help you further. You can also email support@relaypay.co.\"\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-generate-answer",
+      "name": "Generate Answer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2160, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "ANTHROPIC_API_KEY_HERE" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 300,\n  \"temperature\": 0.1,\n  \"system\": \"You are a customer support agent for RelayPay, a B2B cross-border payments platform for African startups and SMEs.\\n\\nGenerate a helpful, accurate spoken response to the customer's question using ONLY the context provided below.\\n\\nSTRICT RULES:\\n1. ONLY use information from the provided context. Do not add any information from your own knowledge.\\n2. If the context doesn't fully answer the question, say: \\\"Based on what I have, [partial answer]. For more details, I'd recommend reaching out to our support team at support@relaypay.co.\\\"\\n3. Keep your response to 2-4 sentences maximum. This will be spoken aloud in a voice call.\\n4. Use simple, clear language. No bullet points, no markdown, no formatting.\\n5. Be warm and professional.\\n6. End with: \\\"Is there anything else I can help with?\\\"\",\n  \"messages\": [{\"role\": \"user\", \"content\": \"CONTEXT FROM KNOWLEDGE BASE:\\n{{ $json.matches?.map(m => m.metadata?.text || '').join('\\n\\n') || 'No context available' }}\\n\\nCUSTOMER QUESTION:\\n{{ $('Extract & Validate Input').first().json.userQuery }}\"}]\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-format-answer",
+      "name": "Format Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, 300],
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst upstream = $('Extract & Validate Input').first().json;\nconst answerText = input.content?.[0]?.text || input.content || 'I was unable to generate an answer. Please contact support@relaypay.co.';\nreturn [{\n  json: {\n    toolCallId: upstream.toolCallId,\n    response: answerText\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-clarify",
+      "name": "Clarification Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 400],
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst clarificationQ = data.clarification_question || 'Could you give me a bit more detail about your question?';\nreturn [{\n  json: {\n    response: clarificationQ,\n    toolCallId: data.toolCallId\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-escalate",
+      "name": "Escalation Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 600],
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst reason = data.escalation_reason || 'Account-specific inquiry';\nreturn [{\n  json: {\n    response: \"That's something our support team can help you with directly. You can reach them at support@relaypay.co, or through the live chat on our website during business hours. They'll be able to look into your account and sort this out.\",\n    toolCallId: data.toolCallId,\n    escalated: true,\n    escalation_reason: reason,\n    original_query: data.userQuery\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-log",
+      "name": "Log Interaction",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 600],
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nconst logEntry = {\n  timestamp: new Date().toISOString(),\n  userQuery: data.userQuery || data.original_query || '',\n  intent: data.intent || 'escalate',\n  category: data.category || 'general',\n  response: (data.response || '').substring(0, 500),\n  escalated: data.escalated || false,\n  escalation_reason: data.escalation_reason || ''\n};\nconsole.log('RELAYPAY_LOG:', JSON.stringify(logEntry));\nreturn [{ json: logEntry }];"
+      }
+    },
+    {
+      "id": "node-format-response",
+      "name": "Format Response for VAPI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2640, 400],
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nreturn [{\n  json: {\n    results: [\n      {\n        toolCallId: data.toolCallId,\n        result: data.response\n      }\n    ]\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-respond",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2880, 400],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Content-Type", "value": "application/json" }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Extract & Validate Input", "type": "main", "index": 0 }]]
+    },
+    "Extract & Validate Input": {
+      "main": [[{ "node": "Check Skip", "type": "main", "index": 0 }]]
+    },
+    "Check Skip": {
+      "main": [
+        [{ "node": "Format Response for VAPI", "type": "main", "index": 0 }],
+        [{ "node": "Classify Intent", "type": "main", "index": 0 }]
+      ]
+    },
+    "Classify Intent": {
+      "main": [[{ "node": "Parse Intent", "type": "main", "index": 0 }]]
+    },
+    "Parse Intent": {
+      "main": [[{ "node": "Route by Intent", "type": "main", "index": 0 }]]
+    },
+    "Route by Intent": {
+      "main": [
+        [{ "node": "Embed Query (Placeholder)", "type": "main", "index": 0 }],
+        [{ "node": "Clarification Response", "type": "main", "index": 0 }],
+        [{ "node": "Escalation Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Embed Query (Placeholder)": {
+      "main": [[{ "node": "Vector Search (Placeholder)", "type": "main", "index": 0 }]]
+    },
+    "Vector Search (Placeholder)": {
+      "main": [[{ "node": "Check RAG Results", "type": "main", "index": 0 }]]
+    },
+    "Check RAG Results": {
+      "main": [
+        [{ "node": "Generate Answer", "type": "main", "index": 0 }],
+        [{ "node": "RAG Fallback Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Answer": {
+      "main": [[{ "node": "Format Answer", "type": "main", "index": 0 }]]
+    },
+    "RAG Fallback Response": {
+      "main": [[{ "node": "Format Response for VAPI", "type": "main", "index": 0 }]]
+    },
+    "Format Answer": {
+      "main": [[{ "node": "Format Response for VAPI", "type": "main", "index": 0 }]]
+    },
+    "Clarification Response": {
+      "main": [
+        [{ "node": "Format Response for VAPI", "type": "main", "index": 0 }],
+        [{ "node": "Log Interaction", "type": "main", "index": 0 }]
+      ]
+    },
+    "Escalation Response": {
+      "main": [
+        [{ "node": "Format Response for VAPI", "type": "main", "index": 0 }],
+        [{ "node": "Log Interaction", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Response for VAPI": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null
+}
