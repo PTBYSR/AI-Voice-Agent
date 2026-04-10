@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect, DragEvent, ChangeEvent } from
 
 import { sbFetch } from "@/lib/supabase";
 
-const WEBHOOK_URL = "https://cohort2pod1.app.n8n.cloud/webhook-test/a8a6a5f8-e5b9-4fe0-a018-6da8e6b281cd";
+const WEBHOOK_URL = "https://cohort2pod1.app.n8n.cloud/webhook/a8a6a5f8-e5b9-4fe0-a018-6da8e6b281cd";
 const ADMIN_KEY = "relaypay-admin-2026";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
