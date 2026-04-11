@@ -382,6 +382,13 @@ export default function AdminKB() {
   async function processLink() {
     const trimmed = urlInput.trim();
     if (!isValidUrl(trimmed)) { setUrlError("Please enter a valid URL."); return; }
+    
+    // Check for duplicates
+    if (processedDocs.some((doc) => doc.source.toLowerCase() === trimmed.toLowerCase())) {
+      setUrlError("This URL is already in the knowledge base.");
+      return;
+    }
+
     setUrlError(""); setUrlProcessing(true);
     const entryId = `url-${Date.now()}`;
     setUrlEntries([{

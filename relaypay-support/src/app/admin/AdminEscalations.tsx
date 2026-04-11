@@ -17,6 +17,7 @@ interface Escalation {
   status: string;
   created_at: string;
   is_test?: boolean;
+  meet_link?: string;
 }
 
 function formatDate(iso: string | null) {
@@ -34,7 +35,55 @@ function StatusBadge({ status }: { status: string }) {
   if (s === "in progress") {
     return <span className="px-2 py-1 rounded bg-[#F39C12]/10 text-[#F39C12] text-[10px] font-bold uppercase tracking-wider">In Progress</span>;
   }
+  if (s === "resolved") {
+    return <span className="px-2 py-1 rounded bg-[#00C9A7]/10 text-[#00916E] text-[10px] font-bold uppercase tracking-wider">Resolved</span>;
+  }
   return <span className="px-2 py-1 rounded bg-[#00C9A7]/10 text-[#00916E] text-[10px] font-bold uppercase tracking-wider">{status || "Closed"}</span>;
+}
+
+function LiveCountdown({ targetDate }: { targetDate: string }) {
+  const [timeLeft, setTimeLeft] = useState<string>("");
+
+  useEffect(() => {
+    function update() {
+      const target = new Date(targetDate).getTime();
+      if (isNaN(target)) {
+        setTimeLeft("");
+        return;
+      }
+
+      const diff = target - Date.now();
+      if (diff <= 0) {
+        setTimeLeft("Meeting has started or passed");
+        return;
+      }
+
+      const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const s = Math.floor((diff % (1000 * 60)) / 1000);
+
+      const parts = [];
+      if (d > 0) parts.push(`${d}d`);
+      if (h > 0 || d > 0) parts.push(`${h}h`);
+      parts.push(`${m}m`);
+      if (d === 0 || (d === 0 && h === 0)) parts.push(`${s}s`); // only show seconds if < 1 day
+
+      setTimeLeft(`in ${parts.join(" ")}`);
+    }
+
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [targetDate]);
+
+  if (!timeLeft) return null;
+
+  return (
+    <span className="px-2 py-0.5 bg-[#0C8C8C]/10 text-[#0C8C8C] rounded-full text-[10px] font-bold tracking-tight">
+      {timeLeft}
+    </span>
+  );
 }
 
 export default function AdminEscalations({ isTestMode = false, isCompact = false }: { isTestMode?: boolean, isCompact?: boolean } = {}) {
@@ -47,6 +96,7 @@ export default function AdminEscalations({ isTestMode = false, isCompact = false
   const [statusFilter, setStatusFilter] = useState("");
 
   const [selectedEscalation, setSelectedEscalation] = useState<Escalation | null>(null);
+  const [escalationToResolve, setEscalationToResolve] = useState<Escalation | null>(null);
 
   useEffect(() => {
     fetchEscalations();
@@ -95,6 +145,26 @@ export default function AdminEscalations({ isTestMode = false, isCompact = false
     }
   }
 
+  async function handleResolve(id: number) {
+    setEscalationToResolve(null);
+    
+    // Optimistic update
+    setEscalations(escalations.map(e => e.id === id ? { ...e, status: "Resolved" } : e));
+    if (selectedEscalation?.id === id) {
+      setSelectedEscalation({ ...selectedEscalation, status: "Resolved" });
+    }
+
+    try {
+      await sbFetch(`escalations?id=eq.${id}`, { 
+        method: "PATCH",
+        body: JSON.stringify({ status: "Resolved" })
+      });
+    } catch (e) {
+      console.error("Failed to resolve", e);
+      fetchEscalations();
+    }
+  }
+
   const filteredEscalations = useMemo(() => {
     return escalations.filter(esc => {
       const searchMatch = !search || 
@@ -118,6 +188,7 @@ export default function AdminEscalations({ isTestMode = false, isCompact = false
       options: [
         { label: "Open", value: "open" },
         { label: "In Progress", value: "in progress" },
+        { label: "Resolved", value: "resolved" },
         { label: "Closed", value: "closed" },
       ]
     },
@@ -212,7 +283,7 @@ export default function AdminEscalations({ isTestMode = false, isCompact = false
                         </td>
                         <td className={`${isCompact ? "px-3 py-2" : "px-6 py-4"} text-right text-[#0A2540]`}>
                           {esc.call_booked || esc.appointment_time ? (
-                            <span className="font-medium text-xs">{esc.appointment_time || "Scheduled"}</span>
+                            <span className="font-medium text-xs whitespace-nowrap">{formatDate(esc.appointment_time)}</span>
                           ) : (
                             <span className="text-[#94a3b8] italic text-xs">No</span>
                           )}
@@ -257,7 +328,18 @@ export default function AdminEscalations({ isTestMode = false, isCompact = false
                 <div>
                    <p className="text-[10px] uppercase font-bold text-[#94a3b8] tracking-wider mb-1">Appointment Time</p>
                    {selectedEscalation.appointment_time ? (
-                      <p className="text-sm font-semibold text-[#0A2540]">{selectedEscalation.appointment_time}</p>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-[#0A2540]">{formatDate(selectedEscalation.appointment_time)}</p>
+                          <LiveCountdown targetDate={selectedEscalation.appointment_time} />
+                        </div>
+                        {selectedEscalation.meet_link && (
+                          <a href={selectedEscalation.meet_link} target="_blank" rel="noopener noreferrer" className="text-[11px] font-semibold text-[#00C9A7] hover:text-[#00916E] hover:underline flex items-center gap-1 mt-1.5">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                            Join Google Meet
+                          </a>
+                        )}
+                      </div>
                    ) : <p className="text-sm text-[#94a3b8]">—</p>}
                 </div>
                 <div>
@@ -285,7 +367,15 @@ export default function AdminEscalations({ isTestMode = false, isCompact = false
                 </div>
              )}
 
-             <div className="pt-6 border-t border-[#E2E5EA] mt-4 flex justify-end">
+             <div className="pt-6 border-t border-[#E2E5EA] mt-4 flex justify-between">
+               {selectedEscalation.status?.toLowerCase() !== "resolved" ? (
+                 <button 
+                   onClick={() => setEscalationToResolve(selectedEscalation)}
+                   className="px-4 py-2 bg-[#0A2540] text-white border border-transparent hover:opacity-90 rounded-lg text-sm font-semibold transition-opacity shadow-sm"
+                 >
+                   Mark as Resolved
+                 </button>
+               ) : <div />}
                <button 
                  onClick={() => handleDelete(selectedEscalation.id)}
                  className="px-4 py-2 bg-white border border-[#C0392B] text-[#C0392B] hover:bg-[#C0392B] hover:text-white rounded-lg text-sm font-semibold transition-colors shadow-sm"
@@ -296,6 +386,32 @@ export default function AdminEscalations({ isTestMode = false, isCompact = false
           </div>
         )}
       </SideDrawer>
+
+      {/* Confirmation Modal */}
+      {escalationToResolve && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-[fadeSlideUp_0.2s_ease-out]">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm flex flex-col gap-4 animate-[fadeSlideDown_0.3s_ease-out]">
+            <h3 className="text-lg font-semibold text-[#0A2540]">Mark as Resolved</h3>
+            <p className="text-sm text-[#4F5B66]">
+              Are you sure you want to resolve the escalation for <strong>{escalationToResolve.user_name}</strong>?
+            </p>
+            <div className="flex gap-3 mt-2">
+              <button
+                onClick={() => setEscalationToResolve(null)}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold text-[#4F5B66] hover:bg-[#F7F8FA] border border-[#E2E5EA] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleResolve(escalationToResolve.id)}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold text-white bg-[#00C9A7] hover:bg-[#00916E] transition-colors"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
