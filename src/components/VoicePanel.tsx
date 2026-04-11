@@ -98,7 +98,7 @@ function EscalationForm({
   // Fetch busy dates when form becomes visible
   useEffect(() => {
     if (visible && animState === "entering") {
-      async function fetchBusyDates() {
+      const fetchBusyDates = async () => {
         setIsLoadingCalendar(true);
         try {
           // TODO: Replace with your actual n8n webhook URL
