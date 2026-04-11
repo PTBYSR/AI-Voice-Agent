@@ -1,9 +1,25 @@
+# dependencies
 /node_modules
-/relaypay-support/node_modules
-/relaypay-support/out
-/relaypay-support/.next
-/relaypay-support/package-lock.json
-/relaypay-support/package.json
-/relaypay-support/yarn.lock
-/relaypay-support/yarn-error.log
-/relaypay-support/yarn.lock 
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env*.local
+.env
